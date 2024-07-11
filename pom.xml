@@ -115,7 +115,17 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
-
+        <dependency>
+            <groupId>com.yucongming</groupId>
+            <artifactId>yucongming-java-sdk</artifactId>
+            <version>0.0.2</version>
+        </dependency>
+        <!-- https://github.com/redisson/redisson#quick-start -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>3.21.3</version>
+        </dependency>
     </dependencies>
 
     <build>

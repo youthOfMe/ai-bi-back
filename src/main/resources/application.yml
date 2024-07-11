@@ -99,3 +99,7 @@ knife4j:
         api-rule: package
         api-rule-resources:
           - com.yang.yangbi.controller
+yuapi:
+  client:
+    access-key: 2odxe0zcc03b6vs8nrz00tcnclbf2rsc
+    secret-key: 60j64xqg36xtpk4vn6cr5goq1zlupnnv

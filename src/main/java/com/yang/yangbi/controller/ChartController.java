@@ -9,17 +9,19 @@ import com.yang.yangbi.common.ResultUtils;
 import com.yang.yangbi.constant.UserConstant;
 import com.yang.yangbi.exception.BusinessException;
 import com.yang.yangbi.exception.ThrowUtils;
-import com.yang.yangbi.model.dto.chart.ChartAddRequest;
-import com.yang.yangbi.model.dto.chart.ChartEditRequest;
-import com.yang.yangbi.model.dto.chart.ChartQueryRequest;
-import com.yang.yangbi.model.dto.chart.ChartUpdateRequest;
+import com.yang.yangbi.mapper.AiManager;
+import com.yang.yangbi.model.dto.chart.*;
 import com.yang.yangbi.model.entity.Chart;
 import com.yang.yangbi.model.entity.User;
+import com.yang.yangbi.model.vo.BiResponse;
 import com.yang.yangbi.service.ChartService;
 import com.yang.yangbi.service.UserService;
+import com.yang.yangbi.utils.ExcelUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
@@ -38,6 +40,9 @@ public class ChartController {
 
     @Resource
     private UserService userService;
+
+    @Resource
+    private AiManager aiManager;
 
 
     // region 增删改查
@@ -196,5 +201,75 @@ public class ChartController {
         return ResultUtils.success(result);
     }
 
+    /**
+     * 智能分析
+     *
+     * @param multipartFile
+     * @param genChartByAiRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/gen")
+    public BaseResponse<BiResponse> genChartByAi(@RequestPart("file")MultipartFile multipartFile,
+                                                 GenChartByAiRequest genChartByAiRequest, HttpServletRequest request) {
+        String name = genChartByAiRequest.getName();
+        String goal = genChartByAiRequest.getGoal();
+        String chartType = genChartByAiRequest.getChartType();
+        // 校验
+        ThrowUtils.throwIf(StringUtils.isBlank(goal), ErrorCode.PARAMS_ERROR, "目标为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(name) && name.length() > 100, ErrorCode.PARAMS_ERROR, "名称过长");
 
+        User loginUser = userService.getLoginUser(request);
+        // final String prompt = "你是一个数据分析师和前端开发专家，接下来我会按照以下固定格式给你提供内容：\n" +
+        //  "分析需求：\n" +
+        //  "{数据分析的需求或者目标}\n" +
+        //  "原始数据：\n" +
+        //  "{csv格式的原始数据，用,作为分隔符}\n" +
+        //  "请根据这两部分内容，按照以下指定格式生成内容（此外不要输出任何多余的开头、结尾、注释）\n" +
+        //  "【【【【【\n" +
+        //  "{前端 Echarts V5 的 option 配置对象js代码，合理地将数据进行可视化，不要生成任何多余的内容，比如注释}\n" +
+        //  "【【【【【\n" +
+        //  "{明确的数据分析结论、越详细越好，不要生成多余的注释}";
+
+        long biModeId = 1659171950288818178L;
+
+        // 用户输入
+        StringBuilder userInput = new StringBuilder();
+        userInput.append("分析需求: ").append("\n");
+
+        // 拼接分析目标
+        String userGoal = goal;
+        if (StringUtils.isNotBlank(chartType)) {
+            userGoal += "，请使用: " + chartType + "图标类型";
+        }
+        userInput.append(userGoal).append("\n");
+        userInput.append("原始数据: ").append("\n");
+        
+        // 原始数据
+        String csvData = ExcelUtils.excelToCsv(multipartFile);
+        userInput.append(csvData).append("\n");
+
+        String result = aiManager.doChat(biModeId, userInput.toString());
+        String[] splits = result.split("【【【【【");
+        ThrowUtils.throwIf(splits.length < 3, ErrorCode.SYSTEM_ERROR, "AI 生成错误");
+        String genChart = splits[1];
+        String genResult = splits[2];
+        // 插入数据到数据库
+        Chart chart = new Chart();
+        chart.setGoal(goal);
+        chart.setName(name);
+        chart.setChartData(csvData);
+        chart.setChartType(chartType);
+        chart.setGenChart(genChart);
+        chart.setGenResult(genResult);
+        chart.setUserId(loginUser.getId());
+        boolean save = chartService.save(chart);
+        ThrowUtils.throwIf(!save, ErrorCode.SYSTEM_ERROR, "AI 生成错误");
+
+        BiResponse biResponse = new BiResponse();
+        biResponse.setGenChart(genChart);
+        biResponse.setGenResult(genResult);
+
+        return ResultUtils.success(biResponse);
+    }
 }
