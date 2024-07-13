@@ -28,6 +28,7 @@ import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 帖子接口
@@ -227,7 +228,7 @@ public class ChartController {
         String originalFilename = multipartFile.getOriginalFilename();
         // 校验文件的大小
         final long ONE_MB = 1024 * 1024L;
-        ThrowUtils.throwIf(ONE_MB > 1, ErrorCode.PARAMS_ERROR, "文件大于1MB");
+        ThrowUtils.throwIf(size > ONE_MB, ErrorCode.PARAMS_ERROR, "文件大于1MB");
         // 校验文件的后缀
         String suffix = FileUtil.getSuffix(originalFilename);
         final List<String> validFileSuffixList = Arrays.asList("png", "jpg", "svg", "webp", "jpeg");
@@ -272,12 +273,17 @@ public class ChartController {
         Chart chart = new Chart();
         chart.setGoal(goal);
         chart.setName(name);
-        chart.setChartData(csvData);
         chart.setChartType(chartType);
         chart.setGenChart(genChart);
         chart.setGenResult(genResult);
         chart.setUserId(loginUser.getId());
         boolean save = chartService.save(chart);
+
+        // 存储原始数据
+        Map<String, Object> map = ExcelUtils.excelToList(multipartFile);
+        map.put("id", chart.getId());
+
+
         ThrowUtils.throwIf(!save, ErrorCode.SYSTEM_ERROR, "AI 生成错误");
 
         BiResponse biResponse = new BiResponse();

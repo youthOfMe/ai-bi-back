@@ -2,6 +2,7 @@ package com.yang.yangbi.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.yang.yangbi.model.entity.Chart;
+import org.apache.ibatis.annotations.Param;
 
 import java.util.List;
 import java.util.Map;
@@ -14,7 +15,9 @@ import java.util.Map;
 */
 public interface ChartMapper extends BaseMapper<Chart> {
 
-    List<Map<String, Object>> queryChartData(String querySql);
+    void createChartDataTable(Map<String, Object> dataMap);
+
+    void insertCsvDataToDataBase(@Param("list") List<List<Object>> list);
 }
 
 
