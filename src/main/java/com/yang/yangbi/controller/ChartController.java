@@ -10,6 +10,7 @@ import com.yang.yangbi.common.ResultUtils;
 import com.yang.yangbi.constant.UserConstant;
 import com.yang.yangbi.exception.BusinessException;
 import com.yang.yangbi.exception.ThrowUtils;
+import com.yang.yangbi.manager.RedisLimitManager;
 import com.yang.yangbi.mapper.AiManager;
 import com.yang.yangbi.model.dto.chart.*;
 import com.yang.yangbi.model.entity.Chart;
@@ -47,6 +48,9 @@ public class ChartController {
 
     @Resource
     private AiManager aiManager;
+
+    @Resource
+    private RedisLimitManager redisLimitManager;
 
 
     // region 增删改查
@@ -231,10 +235,12 @@ public class ChartController {
         ThrowUtils.throwIf(size > ONE_MB, ErrorCode.PARAMS_ERROR, "文件大于1MB");
         // 校验文件的后缀
         String suffix = FileUtil.getSuffix(originalFilename);
-        final List<String> validFileSuffixList = Arrays.asList("png", "jpg", "svg", "webp", "jpeg");
+        final List<String> validFileSuffixList = Arrays.asList("png", "jpg", "svg", "webp", "jpeg", "xlsx");
         ThrowUtils.throwIf(!validFileSuffixList.contains(suffix), ErrorCode.PARAMS_ERROR, "文件后缀非法");
 
         User loginUser = userService.getLoginUser(request);
+        // 限流判断, 每个用户一个限流器
+        redisLimitManager.doRateLimit("genChartByAi_" + loginUser.getId());
         // final String prompt = "你是一个数据分析师和前端开发专家，接下来我会按照以下固定格式给你提供内容：\n" +
         //  "分析需求：\n" +
         //  "{数据分析的需求或者目标}\n" +
@@ -259,7 +265,7 @@ public class ChartController {
         }
         userInput.append(userGoal).append("\n");
         userInput.append("原始数据: ").append("\n");
-        
+
         // 原始数据
         String csvData = ExcelUtils.excelToCsv(multipartFile);
         userInput.append(csvData).append("\n");
@@ -273,6 +279,7 @@ public class ChartController {
         Chart chart = new Chart();
         chart.setGoal(goal);
         chart.setName(name);
+        chart.setChartData(csvData);
         chart.setChartType(chartType);
         chart.setGenChart(genChart);
         chart.setGenResult(genResult);
