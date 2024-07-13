@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 @ConfigurationProperties(prefix = "spring.redis")
 @Data
-public class RedissionConfig {
+public class RedissonConfig {
 
     private Integer database;
 
@@ -26,6 +26,7 @@ public class RedissionConfig {
     @Bean
     public RedissonClient getRedissonClient() {
         Config config = new Config();
+        // 设置使用redis单机 设置数据库和地址
         config.useSingleServer()
                 .setDatabase(database)
                 .setAddress("redis://" + host + ":" + port);
