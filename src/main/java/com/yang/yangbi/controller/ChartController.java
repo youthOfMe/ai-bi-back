@@ -378,7 +378,10 @@ public class ChartController {
         chart.setStatus("wait");
         chart.setUserId(loginUser.getId());
         boolean save = chartService.save(chart);
-        ThrowUtils.throwIf(!save, ErrorCode.SYSTEM_ERROR, "图表保存失败！");
+        if (!save) {
+            handleChartUpdateError(chart.getId(), "提交任务失败！");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "提交任务失败！");
+        }
 
         // todo 建议处理任务队列满了之后，抛出异常的情况
         CompletableFuture.runAsync(() -> {
