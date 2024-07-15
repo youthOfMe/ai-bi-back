@@ -17,6 +17,7 @@ public class ThreadPoolExecutorConfig {
 
     @Bean
     public ThreadPoolExecutor threadPoolExecutor() {
+        CustomRejectHandler customRejectHandler = new CustomRejectHandler();
         ThreadFactory threadFactory = new ThreadFactory() {
             private int count = 1;
 
@@ -28,7 +29,7 @@ public class ThreadPoolExecutorConfig {
             }
 
         };
-        ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(2, 4, 100, TimeUnit.MINUTES, new ArrayBlockingQueue<>(4), threadFactory);
+        ThreadPoolExecutor threadPoolExecutor = new ThreadPoolExecutor(2, 4, 100, TimeUnit.MINUTES, new ArrayBlockingQueue<>(4), threadFactory, customRejectHandler);
         return threadPoolExecutor;
     }
 }

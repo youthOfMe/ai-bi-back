@@ -22,6 +22,7 @@ import com.yang.yangbi.utils.ExcelUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.BeanUtils;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -56,6 +57,9 @@ public class ChartController {
 
     @Resource
     private ThreadPoolExecutor threadPoolExecutor;
+
+    @Resource
+    private RedisTemplate<String, Object> redisTemplate;
 
 
     // region 增删改查
@@ -409,6 +413,126 @@ public class ChartController {
             // todo 建议定义状态为枚举值
             updateChartResult.setStatus("succend");
             boolean updateResult = chartService.updateById(updateChartResult);
+            if (!updateResult) {
+                handleChartUpdateError(chart.getId(), "AI 生成错误");
+            }
+        }, threadPoolExecutor);
+
+        BiResponse biResponse = new BiResponse();
+        biResponse.setId(chart.getId());
+        return ResultUtils.success(biResponse);
+    }
+
+    /**
+     * 只能分析 (异步 + 缓存)
+     *
+     * @param multipartFile
+     * @param genChartByAiRequest
+     * @param request
+     * @return
+     */
+    @PostMapping("/gen/async/redis")
+    public BaseResponse<BiResponse> genChartByAiAsyncAndRedis(@RequestPart("file")MultipartFile multipartFile,
+                                                      GenChartByAiRequest genChartByAiRequest, HttpServletRequest request) {
+        User loginUser = userService.getLoginUser(request);
+        // 限流判断, 每个用户一个限流器
+        redisLimitManager.doRateLimit("genChartByAi_" + loginUser.getId());
+
+        String name = genChartByAiRequest.getName();
+        String goal = genChartByAiRequest.getGoal();
+        String chartType = genChartByAiRequest.getChartType();
+        // 校验
+        ThrowUtils.throwIf(StringUtils.isBlank(goal), ErrorCode.PARAMS_ERROR, "目标为空");
+        ThrowUtils.throwIf(StringUtils.isBlank(name) && name.length() > 100, ErrorCode.PARAMS_ERROR, "名称过长");
+
+        // 校验文件
+        long size = multipartFile.getSize();
+        String originalFilename = multipartFile.getOriginalFilename();
+        // 校验文件的大小
+        final long ONE_MB = 1024 * 1024L;
+        ThrowUtils.throwIf(size > ONE_MB, ErrorCode.PARAMS_ERROR, "文件大于1MB");
+        // 校验文件的后缀
+        String suffix = FileUtil.getSuffix(originalFilename);
+        final List<String> validFileSuffixList = Arrays.asList("png", "jpg", "svg", "webp", "jpeg", "xlsx");
+        ThrowUtils.throwIf(!validFileSuffixList.contains(suffix), ErrorCode.PARAMS_ERROR, "文件后缀非法");
+
+        // final String prompt = "你是一个数据分析师和前端开发专家，接下来我会按照以下固定格式给你提供内容：\n" +
+        //  "分析需求：\n" +
+        //  "{数据分析的需求或者目标}\n" +
+        //  "原始数据：\n" +
+        //  "{csv格式的原始数据，用,作为分隔符}\n" +
+        //  "请根据这两部分内容，按照以下指定格式生成内容（此外不要输出任何多余的开头、结尾、注释）\n" +
+        //  "【【【【【\n" +
+        //  "{前端 Echarts V5 的 option 配置对象js代码，合理地将数据进行可视化，不要生成任何多余的内容，比如注释}\n" +
+        //  "【【【【【\n" +
+        //  "{明确的数据分析结论、越详细越好，不要生成多余的注释}";
+
+        long biModeId = 1659171950288818178L;
+
+        // 用户输入
+        StringBuilder userInput = new StringBuilder();
+        userInput.append("分析需求: ").append("\n");
+
+        // 拼接分析目标
+        String userGoal = goal;
+        if (StringUtils.isNotBlank(chartType)) {
+            userGoal += "，请使用: " + chartType + "图标类型";
+        }
+        userInput.append(userGoal).append("\n");
+        userInput.append("原始数据: ").append("\n");
+
+        // 原始数据
+        String csvData = ExcelUtils.excelToCsv(multipartFile);
+        userInput.append(csvData).append("\n");
+
+        // 接收到任务进行保存数据
+        Chart chart = new Chart();
+        chart.setGoal(goal);
+        chart.setName(name);
+        chart.setChartData(csvData);
+        chart.setChartType(chartType);
+        chart.setStatus("wait");
+        chart.setUserId(loginUser.getId());
+
+        // 获取当前系统时间戳
+        long currentTime = System.currentTimeMillis();
+
+        // 存入redis中的key
+        String redisKey = String.format("aibi:user:chart:%s", loginUser.getId());
+        Map<Object, Object> chartMap = redisTemplate.opsForHash().entries(redisKey);
+        chartMap.put(String.valueOf(currentTime), chart);
+        // 存储进redis中
+        redisTemplate.opsForHash().putAll(redisKey, chartMap);
+
+        // todo 处理错误
+
+        // todo 建议处理任务队列满了之后，抛出异常的情况
+        CompletableFuture.runAsync(() -> {
+            // 获取redis存储的数据
+            Map<Object, Object> chartUpdateMap = redisTemplate.opsForHash().entries(redisKey);
+
+            // 闲修改图表任务状态为 "执行中"。等执行成功后, 修改为 "已完成", 保存执行结果。执行失败后, 状态修改为 "失败", 记录任务失败信息
+            Chart updateChart = (Chart) chartUpdateMap.get(String.valueOf(currentTime));
+            updateChart.setStatus("running");
+            chartUpdateMap.replace(String.valueOf(currentTime), updateChart);
+            redisTemplate.opsForHash().putAll(redisKey, chartUpdateMap);
+
+            // todo 处理错误
+
+            // 调用AI
+            String result = aiManager.doChat(biModeId, userInput.toString());
+            String[] splits = result.split("【【【【【");
+            ThrowUtils.throwIf(splits.length < 3, ErrorCode.SYSTEM_ERROR, "AI 生成错误");
+            String genChart = splits[1].trim();
+            String genResult = splits[2].trim();
+            // 更新数据到数据库
+            Map<Object, Object> chartResultMap = redisTemplate.opsForHash().entries(redisKey);
+            Chart updateChartResult = (Chart) chartResultMap.get(String.valueOf(currentTime));
+            updateChartResult.setGenChart(genChart);
+            updateChartResult.setGenResult(genResult);
+            // todo 建议定义状态为枚举值
+            updateChartResult.setStatus("succend");
+            boolean updateResult = chartService.save(updateChartResult);
             if (!updateResult) {
                 handleChartUpdateError(chart.getId(), "AI 生成错误");
             }
